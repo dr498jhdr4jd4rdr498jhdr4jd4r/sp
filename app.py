@@ -19,7 +19,7 @@ def resolve_url(url):
             if title_match:
                 search_query = (
                     title_match.group(1)
-                    .replace(" | Spotify", "")
+                    .split(" | ")[0]
                     .replace(" - song and lyrics by ", " ")
                 )
                 return f"ytsearch1:{search_query} audio"
@@ -54,7 +54,7 @@ def extract_info():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(resolved_url, download=False)
-            if 'entries' in info and len(info['entries']) > 0:
+            if 'entries' in info and info['entries']:
                 info = info['entries'][0]
 
             return jsonify({
@@ -93,13 +93,11 @@ def download_audio():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(resolved_url, download=True)
-            if 'entries' in info and len(info['entries']) > 0:
+            if 'entries' in info and info['entries']:
                 info = info['entries'][0]
             title = info.get('title', 'Audio_Download')
             
         file_path = os.path.join(DOWNLOAD_DIR, f"{job_id}.mp3")
-        
-        # Enhanced filename sanitization
         safe_title = re.sub(r'[^\w\s-]', '', title).strip()
         download_name = f"{safe_title or 'track'}.mp3"
 
