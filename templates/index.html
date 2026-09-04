@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Extractor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0a0a0a;
+            --accent-emerald: #10b981;
+            --accent-hover: #059669;
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 3rem 1rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .search-box {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            display: flex;
+            gap: 1rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            color: var(--text-main);
+            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        input:focus {
+            border-color: var(--accent-emerald);
+        }
+
+        button {
+            background: var(--accent-emerald);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            padding: 0 2rem;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+        }
+
+        button:disabled {
+            background: #374151;
+            color: #9ca3af;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .result-card {
+            display: none;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .media-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        @media (min-width: 640px) {
+            .media-info {
+                flex-direction: row;
+            }
+        }
+
+        .thumbnail-container {
+            position: relative;
+            width: 100%;
+            max-width: 350px;
+            background: #000;
+        }
+
+        .thumbnail {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .duration-badge {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            backdrop-filter: blur(4px);
+        }
+
+        .details {
+            padding: 2rem;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+            line-height: 1.4;
+        }
+
+        .qualities-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-top: auto;
+        }
+
+        .quality-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-emerald);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            text-decoration: none;
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .quality-btn:hover {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: var(--accent-emerald);
+        }
+        
+        .error-message {
+            color: #ef4444;
+            text-align: center;
+            margin-top: 1rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="search-box">
+            <input type="text" id="urlInput" placeholder="Paste media URL here..." autocomplete="off">
+            <button id="extractBtn" onclick="extractMedia()">Extract</button>
+        </div>
+        <div id="errorMsg" class="error-message"></div>
+
+        <div class="result-card" id="resultCard">
+            <div class="media-info">
+                <div class="thumbnail-container">
+                    <img src="" alt="Thumbnail" class="thumbnail" id="thumbImg">
+                    <div class="duration-badge" id="durationBadge">00:00</div>
+                </div>
+                <div class="details">
+                    <h2 class="title" id="mediaTitle">Loading...</h2>
+                    <div class="qualities-grid" id="qualitiesGrid">
+                        <!-- Quality buttons injected via JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function extractMedia() {
+            const urlInput = document.getElementById('urlInput');
+            const extractBtn = document.getElementById('extractBtn');
+            const resultCard = document.getElementById('resultCard');
+            const errorMsg = document.getElementById('errorMsg');
+            
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            // Reset UI state
+            extractBtn.disabled = true;
+            extractBtn.textContent = 'Processing...';
+            errorMsg.style.display = 'none';
+            resultCard.style.display = 'none';
+            document.getElementById('qualitiesGrid').innerHTML = '';
+
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to extract media details');
+                }
+
+                // Populate data
+                document.getElementById('thumbImg').src = data.thumbnail;
+                document.getElementById('durationBadge').textContent = data.duration;
+                document.getElementById('mediaTitle').textContent = data.title;
+
+                const grid = document.getElementById('qualitiesGrid');
+                data.formats.forEach(format => {
+                    const btn = document.createElement('a');
+                    btn.className = 'quality-btn';
+                    btn.href = format.url;
+                    btn.target = '_blank';
+                    btn.textContent = `${format.resolution} (${format.ext})`;
+                    grid.appendChild(btn);
+                });
+
+                resultCard.style.display = 'block';
+
+            } catch (err) {
+                errorMsg.textContent = err.message;
+                errorMsg.style.display = 'block';
+            } finally {
+                extractBtn.disabled = false;
+                extractBtn.textContent = 'Extract';
+            }
+        }
+        
+        // Enter key support
+        document.getElementById('urlInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') extractMedia();
+        });
+    </script>
+</body>
+</html>
