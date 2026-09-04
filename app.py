@@ -9,24 +9,30 @@ app = Flask(__name__)
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-def resolve_url(url):
-    """Resolves Spotify URLs to YouTube search queries using metadata scraper."""
-    if "spotify.com" in url:
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, headers=headers, timeout=10)
-            title_match = re.search(r'<title>(.+?)</title>', response.text)
-            if title_match:
-                search_query = (
-                    title_match.group(1)
-                    .split(" | ")[0]
-                    .replace(" - song and lyrics by ", " ")
-                )
-                return f"ytsearch1:{search_query} audio"
-            raise ValueError("Could not read Spotify metadata title.")
-        except Exception as e:
-            raise RuntimeError(f"Spotify parse error: {str(e)}")
-    return url
+def fetch_spotify_metadata(url):
+    """Scrapes official track details and cover art from Spotify OpenGraph tags."""
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    response = requests.get(url, headers=headers, timeout=10)
+    
+    title_match = re.search(r'<meta property="og:title" content="([^"]+)"', response.text)
+    image_match = re.search(r'<meta property="og:image" content="([^"]+)"', response.text)
+    
+    if not title_match:
+        raise ValueError("Could not extract track title from Spotify link.")
+        
+    track_title = title_match.group(1)
+    thumbnail_url = image_match.group(1) if image_match else ""
+    
+    # Clean up Spotify title formatting (e.g., remove lyrics suffix or platform text)
+    clean_query = (
+        track_title
+        .replace(" - song and lyrics by ", " - ")
+        .replace(" | Spotify", "")
+        .split(" | ")[0]
+    )
+    search_query = f"ytsearch1:{clean_query} official audio"
+    
+    return search_query, track_title, thumbnail_url
 
 @app.route('/')
 def index():
@@ -41,25 +47,28 @@ def extract_info():
         return jsonify({'error': 'No URL provided'}), 400
 
     try:
-        resolved_url = resolve_url(raw_url)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        if "spotify.com" in raw_url:
+            search_query, spotify_title, spotify_thumb = fetch_spotify_metadata(raw_url)
+            target_url = search_query
+        else:
+            target_url = raw_url
+            spotify_title = None
+            spotify_thumb = None
 
-    ydl_opts = {
-        'quiet': True,
-        'skip_download': True,
-        'noplaylist': True,
-    }
+        ydl_opts = {
+            'quiet': True,
+            'skip_download': True,
+            'noplaylist': True,
+        }
 
-    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(resolved_url, download=False)
+            info = ydl.extract_info(target_url, download=False)
             if 'entries' in info and info['entries']:
                 info = info['entries'][0]
 
             return jsonify({
-                'title': info.get('title', 'Unknown Title'),
-                'thumbnail': info.get('thumbnail', ''),
+                'title': spotify_title or info.get('title', 'Unknown Title'),
+                'thumbnail': spotify_thumb or info.get('thumbnail', ''),
                 'duration': info.get('duration_string', '00:00'),
                 'original_url': raw_url
             })
@@ -73,29 +82,32 @@ def download_audio():
         return "No URL provided", 400
 
     try:
-        resolved_url = resolve_url(raw_url)
-    except Exception as e:
-        return str(e), 400
+        if "spotify.com" in raw_url:
+            search_query, spotify_title, _ = fetch_spotify_metadata(raw_url)
+            target_url = search_query
+            custom_title = spotify_title
+        else:
+            target_url = raw_url
+            custom_title = None
 
-    job_id = str(uuid.uuid4())
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{job_id}.%(ext)s'),
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'noplaylist': True,
-    }
+        job_id = str(uuid.uuid4())
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(DOWNLOAD_DIR, f'{job_id}.%(ext)s'),
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'quiet': True,
+            'noplaylist': True,
+        }
 
-    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(resolved_url, download=True)
+            info = ydl.extract_info(target_url, download=True)
             if 'entries' in info and info['entries']:
                 info = info['entries'][0]
-            title = info.get('title', 'Audio_Download')
+            title = custom_title or info.get('title', 'Audio_Download')
             
         file_path = os.path.join(DOWNLOAD_DIR, f"{job_id}.mp3")
         safe_title = re.sub(r'[^\w\s-]', '', title).strip()
