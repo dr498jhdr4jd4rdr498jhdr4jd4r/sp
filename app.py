@@ -1,10 +1,13 @@
 import os
 import re
+import uuid
 import requests
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_file, after_this_request
 import yt_dlp
 
 app = Flask(__name__)
+DOWNLOAD_DIR = "downloads"
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 @app.route('/')
 def index():
@@ -18,27 +21,19 @@ def extract_info():
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # --- SPOTIFY DRM BYPASS LOGIC ---
+    # Handle Spotify bypass for metadata
     if "spotify.com" in url:
         try:
-            # Fetch the Spotify page to grab the title and artist
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            headers = {'User-Agent': 'Mozilla/5.0'}
             response = requests.get(url, headers=headers)
-            
-            # Extract the page title (e.g., "SongName - song and lyrics by Artist | Spotify")
             title_match = re.search(r'<title>(.+?)</title>', response.text)
             if title_match:
-                raw_title = title_match.group(1)
-                # Clean up the title to create a clean search query
-                search_query = raw_title.replace(" | Spotify", "").replace(" - song and lyrics by ", " ")
-                
-                # Tell yt-dlp to search YouTube for the top result instead of using the Spotify URL
+                search_query = title_match.group(1).replace(" | Spotify", "").replace(" - song and lyrics by ", " ")
                 url = f"ytsearch1:{search_query} audio"
             else:
                 return jsonify({'error': 'Could not read Spotify metadata'}), 400
         except Exception as e:
             return jsonify({'error': f'Spotify parse error: {str(e)}'}), 500
-    # --------------------------------
 
     ydl_opts = {
         'quiet': True,
@@ -48,51 +43,81 @@ def extract_info():
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # If it's a search query, extract_info returns a dictionary with an 'entries' list
             info = ydl.extract_info(url, download=False)
-            
             if 'entries' in info and len(info['entries']) > 0:
                 info = info['entries'][0]
-
-            formats = []
-            seen_resolutions = set()
-            
-            for f in info.get('formats', []):
-                # Handle standard video/audio formats
-                res = f.get('format_note', '') or f.get('resolution', '')
-                ext = f.get('ext', '')
-                vcodec = f.get('vcodec', 'none')
-                acodec = f.get('acodec', 'none')
-                
-                # We want either mp4 videos OR m4a/webm audio-only streams (great for music)
-                if ext in ['mp4', 'm4a', 'webm'] and (vcodec != 'none' or acodec != 'none'):
-                    display_res = res if res and res != 'audio only' else f"{f.get('abr', 128)}kbps Audio"
-                    
-                    if display_res not in seen_resolutions:
-                        seen_resolutions.add(display_res)
-                        formats.append({
-                            'resolution': display_res,
-                            'ext': ext,
-                            'url': f.get('url'),
-                            'is_audio': vcodec == 'none'
-                        })
-            
-            # Sort formats (video highest to lowest, then audio)
-            def sort_key(x):
-                if x['is_audio']: return -1
-                return int(''.join(filter(str.isdigit, x['resolution'])) or 0)
-                
-            formats.sort(key=sort_key, reverse=True)
 
             return jsonify({
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
                 'duration': info.get('duration_string', '00:00'),
-                'formats': formats
+                'original_url': request.get_json().get('url') # Send back the exact URL the user typed
             })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/download', methods=['GET'])
+def download_audio():
+    url = request.args.get('url')
+    if not url:
+        return "No URL provided", 400
+
+    # Handle Spotify bypass for downloading
+    if "spotify.com" in url:
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers)
+            title_match = re.search(r'<title>(.+?)</title>', response.text)
+            if title_match:
+                search_query = title_match.group(1).replace(" | Spotify", "").replace(" - song and lyrics by ", " ")
+                url = f"ytsearch1:{search_query} audio"
+            else:
+                return "Could not read Spotify metadata", 400
+        except Exception as e:
+            return f"Spotify parse error: {str(e)}", 500
+
+    job_id = str(uuid.uuid4())
+    
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': f'{DOWNLOAD_DIR}/{job_id}.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'quiet': True,
+        'noplaylist': True,
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if 'entries' in info and len(info['entries']) > 0:
+                info = info['entries'][0]
+            title = info.get('title', 'Audio_Download')
+            
+        file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
+        
+        # Clean filename to prevent browser download errors
+        safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
+        download_name = f"{safe_title}.mp3"
+
+        # This executes AFTER the file is sent to the user to free up server space
+        @after_this_request
+        def remove_file(response):
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as e:
+                app.logger.error(f"Error removing file: {e}")
+            return response
+
+        return send_file(file_path, as_attachment=True, download_name=download_name, mimetype="audio/mpeg")
+
+    except Exception as e:
+        return f"Download failed: {str(e)}", 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
