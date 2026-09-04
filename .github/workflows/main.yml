@@ -1,5 +1,5 @@
 # .github/workflows/deploy.yml
-name: Deploy to Cloudflare Tunnel
+name: Deploy to Cloudflare Tunnel with Cookie Bypass
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 60
     
     steps:
-    - name: Create project files
+    - name: Create project files with cookie bypass
       run: |
         # Create directories
         mkdir -p templates downloads
@@ -23,6 +23,7 @@ jobs:
         yt-dlp
         gunicorn
         requests
+        browser-cookie3
         EOF
         
         # Create Procfile
@@ -35,7 +36,7 @@ jobs:
         FROM python:3.11-slim
         
         RUN apt-get update && \
-            apt-get install -y ffmpeg curl unzip && \
+            apt-get install -y ffmpeg curl unzip wget && \
             rm -rf /var/lib/apt/lists/*
         
         RUN curl -fsSL https://deno.land/install.sh | sh
@@ -238,7 +239,7 @@ jobs:
         </html>
         EOF
         
-        # Create app.py
+        # Create app.py with full cookie bypass, Deno, and WARP support
         cat > app.py << 'EOF'
         import os
         import re
@@ -252,20 +253,72 @@ jobs:
         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
         
         def get_base_ydl_opts():
-            return {
+            """Returns options with multiple bypass methods"""
+            opts = {
                 'quiet': True,
                 'noplaylist': True,
-                'js_interp': 'deno',
+                'js_interp': 'deno',  # Use Deno for JavaScript challenges
+                'extract_flat': False,
+                'ignoreerrors': True,
+                'no_warnings': False,
+                'sleep_interval': 5,  # Avoid rate limiting
+                'max_sleep_interval': 10,
+                'sleep_interval_requests': 1,
             }
+            
+            # Method 1: Browser cookies (most effective)
+            try:
+                opts['cookiesfrombrowser'] = ('chrome',)
+            except Exception:
+                try:
+                    opts['cookiesfrombrowser'] = ('firefox',)
+                except Exception:
+                    pass
+            
+            # Method 2: Try WARP proxy if available
+            try:
+                # Check if WARP is running
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                result = sock.connect_ex(('127.0.0.1', 1080))
+                sock.close()
+                if result == 0:
+                    opts['proxy'] = 'socks5://127.0.0.1:1080'
+                else:
+                    # Try common WARP ports
+                    for port in [1080, 40000, 40001]:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(1)
+                        result = sock.connect_ex(('127.0.0.1', port))
+                        sock.close()
+                        if result == 0:
+                            opts['proxy'] = f'socks5://127.0.0.1:{port}'
+                            break
+            except Exception:
+                pass
+            
+            # Method 3: Use user agent rotation
+            opts['user_agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            
+            return opts
         
         def resolve_spotify_url(url):
+            """Scrapes Spotify metadata to construct a search query"""
             try:
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
                 response = requests.get(url, headers=headers, timeout=10)
                 title_match = re.search(r'<title>(.+?)</title>', response.text)
                 if title_match:
                     raw_title = title_match.group(1)
                     clean_query = raw_title.replace(" | Spotify", "").replace(" - song and lyrics by ", " - ")
+                    # Extract artist and track
+                    artist_match = re.search(r'(.*?)\s*-\s*(.*?)(?:\s*\||\s*·|\s*–)', clean_query)
+                    if artist_match:
+                        artist, track = artist_match.group(1).strip(), artist_match.group(2).strip()
+                        return f"ytsearch1:{artist} - {track} audio"
                     return f"ytsearch1:{clean_query} audio"
             except Exception:
                 pass
@@ -308,7 +361,13 @@ jobs:
                     })
         
             except Exception as e:
-                return jsonify({'error': f'Extraction failed: {str(e)}'}), 500
+                error_msg = str(e)
+                # Provide helpful error messages
+                if "Sign in to confirm you're not a bot" in error_msg:
+                    error_msg = "YouTube bot check detected. Please use cookies: yt-dlp --cookies-from-browser chrome [URL]"
+                elif "cookies" in error_msg.lower():
+                    error_msg = "Cookie authentication needed. Run: yt-dlp --cookies-from-browser chrome [URL]"
+                return jsonify({'error': f'Extraction failed: {error_msg}'}), 500
         
         @app.route('/api/download', methods=['GET'])
         def download_audio():
@@ -361,7 +420,10 @@ jobs:
                 return send_file(file_path, as_attachment=True, download_name=download_name, mimetype="audio/mpeg")
         
             except Exception as e:
-                return f"Download execution failed: {str(e)}", 500
+                error_msg = str(e)
+                if "Sign in to confirm you're not a bot" in error_msg:
+                    error_msg = "YouTube bot check detected. Please use cookies: yt-dlp --cookies-from-browser chrome [URL]"
+                return f"Download execution failed: {error_msg}", 500
         
         if __name__ == '__main__':
             port = int(os.environ.get("PORT", 5000))
@@ -372,13 +434,13 @@ jobs:
         cat > README.md << 'EOF'
         # Muvixo Spotify & YouTube Downloader
         
-        A clean, modern web application designed to safely fetch and convert high-fidelity MP3 audio files from Spotify and YouTube links.
+        A clean, modern web application for extracting high-fidelity MP3 audio from Spotify and YouTube.
         
         ## Features
         - Extract audio from Spotify and YouTube links
         - Convert to high-quality MP3 (192kbps)
         - Clean, modern UI with dark theme
-        - Uses DenoJS for advanced extraction
+        - Uses DenoJS and WARP for advanced extraction
         
         ## Deployment
         This app is deployed using Cloudflare Tunnel via GitHub Actions.
@@ -394,7 +456,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ffmpeg curl unzip wget
+        sudo apt-get install -y ffmpeg curl unzip wget net-tools
 
     - name: Install Deno
       run: |
@@ -403,6 +465,20 @@ jobs:
         export PATH="$DENO_INSTALL/bin:$PATH"
         echo "DENO_INSTALL=$HOME/.deno" >> $GITHUB_ENV
         echo "$HOME/.deno/bin" >> $GITHUB_PATH
+        deno --version
+
+    - name: Install and configure WARP
+      run: |
+        # Install Cloudflare WARP
+        curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | sudo gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflare-client.list
+        sudo apt-get update
+        sudo apt-get install -y cloudflare-warp
+        
+        # Start WARP
+        warp-cli --accept-tos connect
+        sleep 5
+        warp-cli status
 
     - name: Install Python dependencies
       run: |
@@ -416,11 +492,13 @@ jobs:
         sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
         cloudflared --version
 
-    - name: Start Flask app
+    - name: Start Flask app with bypass
       run: |
+        # Export cookies from browser (if possible)
         nohup python app.py > flask.log 2>&1 &
         sleep 10
         
+        # Check if Flask is running
         if curl -s http://localhost:5000 > /dev/null; then
           echo "✅ Flask app is running"
         else
@@ -454,9 +532,10 @@ jobs:
         
         # Keep tunnel running
         echo "🔄 Tunnel is running (PID: $CF_PID)"
+        echo "💡 To test: curl -s $CF_URL"
         wait $CF_PID
 
-    - name: Display URL
+    - name: Display Deployment URL
       if: success()
       run: |
         echo "=================================================="
@@ -465,4 +544,7 @@ jobs:
         echo "🌐 Your app is live at: ${{ env.CF_URL }}"
         echo "📱 Share this URL to access your app"
         echo "⏱️ Tunnel active for job duration (max 60 min)"
+        echo "=================================================="
+        echo "🔄 Testing the URL..."
+        curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" ${{ env.CF_URL }}
         echo "=================================================="
