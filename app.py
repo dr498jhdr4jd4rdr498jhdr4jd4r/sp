@@ -51,7 +51,7 @@ def extract_info():
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
                 'duration': info.get('duration_string', '00:00'),
-                'original_url': request.get_json().get('url') # Send back the exact URL the user typed
+                'original_url': request.get_json().get('url')
             })
 
     except Exception as e:
@@ -63,7 +63,6 @@ def download_audio():
     if not url:
         return "No URL provided", 400
 
-    # Handle Spotify bypass for downloading
     if "spotify.com" in url:
         try:
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -99,12 +98,9 @@ def download_audio():
             title = info.get('title', 'Audio_Download')
             
         file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
-        
-        # Clean filename to prevent browser download errors
         safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
         download_name = f"{safe_title}.mp3"
 
-        # This executes AFTER the file is sent to the user to free up server space
         @after_this_request
         def remove_file(response):
             try:
