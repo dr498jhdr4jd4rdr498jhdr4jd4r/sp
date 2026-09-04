@@ -81,8 +81,8 @@
         .media-info { display: flex; flex-direction: column; }
         @media (min-width: 640px) { .media-info { flex-direction: row; } }
 
-        .thumbnail-container { position: relative; width: 100%; max-width: 350px; }
-        .thumbnail { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .thumbnail-container { position: relative; width: 100%; max-width: 350px; background: #000; }
+        .thumbnail { width: 100%; height: 100%; object-fit: cover; display: block; min-height: 200px; }
         
         .duration-badge {
             position: absolute;
@@ -94,7 +94,7 @@
         }
 
         .details { padding: 2rem; flex: 1; display: flex; flex-direction: column; }
-        .title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem; }
+        .title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem; line-height: 1.4; }
 
         .download-btn {
             display: inline-flex;
@@ -136,7 +136,7 @@
                 </div>
                 <div class="details">
                     <h2 class="title" id="mediaTitle">Loading...</h2>
-                    <a href="#" class="download-btn" id="downloadBtn">⬇ Download MP3 (192kbps)</a>
+                    <a href="#" class="download-btn" id="downloadBtn" onclick="triggerDownload(event)">⬇ Download MP3 (192kbps)</a>
                 </div>
             </div>
         </div>
@@ -165,7 +165,6 @@
                 });
 
                 const data = await response.json();
-
                 if (!response.ok) throw new Error(data.error || 'Failed to extract media details');
 
                 document.getElementById('thumbImg').src = data.thumbnail;
@@ -173,7 +172,7 @@
                 document.getElementById('mediaTitle').textContent = data.title;
                 
                 const downloadBtn = document.getElementById('downloadBtn');
-                downloadBtn.href = `/api/download?url=${encodeURIComponent(data.original_url)}`;
+                downloadBtn.dataset.url = data.original_url;
 
                 resultCard.style.display = 'block';
             } catch (err) {
@@ -183,6 +182,26 @@
                 extractBtn.disabled = false;
                 extractBtn.textContent = 'Find Track';
             }
+        }
+
+        function triggerDownload(e) {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            const originalUrl = btn.dataset.url;
+            if (!originalUrl) return;
+
+            // Visual feedback during processing/download conversion
+            const originalText = btn.textContent;
+            btn.textContent = 'Processing & Downloading...';
+            btn.style.pointerEvents = 'none';
+
+            // Trigger file download via invisible iframe or direct location change
+            window.location.href = `/api/download?url=${encodeURIComponent(originalUrl)}`;
+
+            setTimeout(() => {
+                btn.textContent = originalText;
+                btn.style.pointerEvents = 'auto';
+            }, 4000);
         }
         
         document.getElementById('urlInput').addEventListener('keypress', function(e) {
