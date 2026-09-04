@@ -172,7 +172,6 @@
                 document.getElementById('durationBadge').textContent = data.duration;
                 document.getElementById('mediaTitle').textContent = data.title;
                 
-                // Set the download button link to point to our new API endpoint
                 const downloadBtn = document.getElementById('downloadBtn');
                 downloadBtn.href = `/api/download?url=${encodeURIComponent(data.original_url)}`;
 
