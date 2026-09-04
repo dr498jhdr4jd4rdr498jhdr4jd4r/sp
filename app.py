@@ -9,31 +9,41 @@ app = Flask(__name__)
 DOWNLOAD_DIR = "downloads"
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
+def resolve_url(url):
+    """Resolves Spotify URLs to YouTube search queries using metadata scraper."""
+    if "spotify.com" in url:
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            response = requests.get(url, headers=headers, timeout=10)
+            title_match = re.search(r'<title>(.+?)</title>', response.text)
+            if title_match:
+                search_query = (
+                    title_match.group(1)
+                    .replace(" | Spotify", "")
+                    .replace(" - song and lyrics by ", " ")
+                )
+                return f"ytsearch1:{search_query} audio"
+            raise ValueError("Could not read Spotify metadata title.")
+        except Exception as e:
+            raise RuntimeError(f"Spotify parse error: {str(e)}")
+    return url
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/api/extract', methods=['POST'])
 def extract_info():
-    data = request.get_json()
-    url = data.get('url')
+    data = request.get_json() or {}
+    raw_url = data.get('url')
     
-    if not url:
+    if not raw_url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    # Handle Spotify bypass for metadata
-    if "spotify.com" in url:
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, headers=headers)
-            title_match = re.search(r'<title>(.+?)</title>', response.text)
-            if title_match:
-                search_query = title_match.group(1).replace(" | Spotify", "").replace(" - song and lyrics by ", " ")
-                url = f"ytsearch1:{search_query} audio"
-            else:
-                return jsonify({'error': 'Could not read Spotify metadata'}), 400
-        except Exception as e:
-            return jsonify({'error': f'Spotify parse error: {str(e)}'}), 500
+    try:
+        resolved_url = resolve_url(raw_url)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
     ydl_opts = {
         'quiet': True,
@@ -43,7 +53,7 @@ def extract_info():
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+            info = ydl.extract_info(resolved_url, download=False)
             if 'entries' in info and len(info['entries']) > 0:
                 info = info['entries'][0]
 
@@ -51,36 +61,26 @@ def extract_info():
                 'title': info.get('title', 'Unknown Title'),
                 'thumbnail': info.get('thumbnail', ''),
                 'duration': info.get('duration_string', '00:00'),
-                'original_url': request.get_json().get('url')
+                'original_url': raw_url
             })
-
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/download', methods=['GET'])
 def download_audio():
-    url = request.args.get('url')
-    if not url:
+    raw_url = request.args.get('url')
+    if not raw_url:
         return "No URL provided", 400
 
-    if "spotify.com" in url:
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            response = requests.get(url, headers=headers)
-            title_match = re.search(r'<title>(.+?)</title>', response.text)
-            if title_match:
-                search_query = title_match.group(1).replace(" | Spotify", "").replace(" - song and lyrics by ", " ")
-                url = f"ytsearch1:{search_query} audio"
-            else:
-                return "Could not read Spotify metadata", 400
-        except Exception as e:
-            return f"Spotify parse error: {str(e)}", 500
+    try:
+        resolved_url = resolve_url(raw_url)
+    except Exception as e:
+        return str(e), 400
 
     job_id = str(uuid.uuid4())
-    
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': f'{DOWNLOAD_DIR}/{job_id}.%(ext)s',
+        'outtmpl': os.path.join(DOWNLOAD_DIR, f'{job_id}.%(ext)s'),
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -92,14 +92,16 @@ def download_audio():
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            info = ydl.extract_info(resolved_url, download=True)
             if 'entries' in info and len(info['entries']) > 0:
                 info = info['entries'][0]
             title = info.get('title', 'Audio_Download')
             
-        file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
-        safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c==' ']).rstrip()
-        download_name = f"{safe_title}.mp3"
+        file_path = os.path.join(DOWNLOAD_DIR, f"{job_id}.mp3")
+        
+        # Enhanced filename sanitization
+        safe_title = re.sub(r'[^\w\s-]', '', title).strip()
+        download_name = f"{safe_title or 'track'}.mp3"
 
         @after_this_request
         def remove_file(response):
