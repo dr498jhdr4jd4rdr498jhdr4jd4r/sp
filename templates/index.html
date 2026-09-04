@@ -176,6 +176,7 @@
             border-radius: 8px;
             font-weight: 500;
             transition: all 0.2s;
+            text-align: center;
         }
 
         .quality-btn:hover {
@@ -226,7 +227,6 @@
             const url = urlInput.value.trim();
             if (!url) return;
 
-            // Reset UI state
             extractBtn.disabled = true;
             extractBtn.textContent = 'Processing...';
             errorMsg.style.display = 'none';
@@ -246,7 +246,6 @@
                     throw new Error(data.error || 'Failed to extract media details');
                 }
 
-                // Populate data
                 document.getElementById('thumbImg').src = data.thumbnail;
                 document.getElementById('durationBadge').textContent = data.duration;
                 document.getElementById('mediaTitle').textContent = data.title;
@@ -272,7 +271,6 @@
             }
         }
         
-        // Enter key support
         document.getElementById('urlInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') extractMedia();
         });
