@@ -1,0 +1,468 @@
+# .github/workflows/deploy.yml
+name: Deploy to Cloudflare Tunnel
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    
+    steps:
+    - name: Create project files
+      run: |
+        # Create directories
+        mkdir -p templates downloads
+        
+        # Create requirements.txt
+        cat > requirements.txt << 'EOF'
+        flask
+        yt-dlp
+        gunicorn
+        requests
+        EOF
+        
+        # Create Procfile
+        cat > Procfile << 'EOF'
+        web: gunicorn app:app --bind 0.0.0.0:$PORT --threads 4
+        EOF
+        
+        # Create Dockerfile
+        cat > Dockerfile << 'EOF'
+        FROM python:3.11-slim
+        
+        RUN apt-get update && \
+            apt-get install -y ffmpeg curl unzip && \
+            rm -rf /var/lib/apt/lists/*
+        
+        RUN curl -fsSL https://deno.land/install.sh | sh
+        ENV PATH="/root/.deno/bin:$PATH"
+        
+        WORKDIR /app
+        
+        COPY requirements.txt .
+        RUN pip install --no-cache-dir -r requirements.txt
+        
+        COPY . .
+        
+        CMD gunicorn app:app --bind 0.0.0.0:$PORT --threads 4
+        EOF
+        
+        # Create templates/index.html
+        cat > templates/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Muvixo - High Fidelity Audio Extractor</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+            <style>
+                :root {
+                    --bg-dark: #0a0a0a;
+                    --accent-emerald: #10b981;
+                    --accent-hover: #059669;
+                    --glass-bg: rgba(255, 255, 255, 0.03);
+                    --glass-border: rgba(255, 255, 255, 0.08);
+                    --text-main: #f3f4f6;
+                }
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body {
+                    background-color: var(--bg-dark);
+                    color: var(--text-main);
+                    font-family: 'Inter', sans-serif;
+                    min-height: 100vh;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    padding: 3rem 1rem;
+                }
+                .container { width: 100%; max-width: 800px; }
+                header { text-align: center; margin-bottom: 2rem; }
+                header h1 { font-size: 2rem; color: #fff; margin-bottom: 0.5rem; }
+                header p { color: #888; font-size: 0.95rem; }
+                .search-box {
+                    background: var(--glass-bg);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid var(--glass-border);
+                    border-radius: 16px;
+                    padding: 2rem;
+                    margin-bottom: 2rem;
+                    display: flex;
+                    gap: 1rem;
+                }
+                input {
+                    flex: 1;
+                    background: rgba(0, 0, 0, 0.2);
+                    border: 1px solid var(--glass-border);
+                    border-radius: 8px;
+                    padding: 1rem;
+                    color: var(--text-main);
+                    font-size: 1rem;
+                    outline: none;
+                    transition: 0.2s;
+                }
+                input:focus { border-color: var(--accent-emerald); }
+                button {
+                    background: var(--accent-emerald);
+                    color: #000;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 0 2rem;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: 0.2s;
+                }
+                button:hover { background: var(--accent-hover); }
+                button:disabled { background: #374151; cursor: not-allowed; }
+                .result-card {
+                    display: none;
+                    background: var(--glass-bg);
+                    backdrop-filter: blur(12px);
+                    border: 1px solid var(--glass-border);
+                    border-radius: 16px;
+                    overflow: hidden;
+                }
+                .media-info { display: flex; flex-direction: column; }
+                @media (min-width: 640px) { .media-info { flex-direction: row; } }
+                .thumbnail-container { position: relative; width: 100%; max-width: 300px; }
+                .thumbnail { width: 100%; height: 100%; object-fit: cover; display: block; }
+                .duration-badge {
+                    position: absolute;
+                    bottom: 12px; right: 12px;
+                    background: rgba(0, 0, 0, 0.8);
+                    padding: 4px 8px;
+                    border-radius: 6px;
+                    font-size: 0.85rem;
+                }
+                .details { padding: 2rem; flex: 1; display: flex; flex-direction: column; }
+                .title { font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem; }
+                .download-btn {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: var(--accent-emerald);
+                    color: #000;
+                    text-decoration: none;
+                    padding: 1rem;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 1.1rem;
+                    margin-top: auto;
+                    transition: 0.2s;
+                }
+                .download-btn:hover {
+                    background: var(--accent-hover);
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+                }
+                .error-message { color: #ef4444; text-align: center; margin-top: 1rem; display: none; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <header>
+                    <h1>Muvixo Extractor</h1>
+                    <p>Extract high-fidelity audio tracks from Spotify & YouTube seamlessly</p>
+                </header>
+                <div class="search-box">
+                    <input type="text" id="urlInput" placeholder="Paste Spotify or YouTube link..." autocomplete="off">
+                    <button id="extractBtn" onclick="extractMedia()">Find Track</button>
+                </div>
+                <div id="errorMsg" class="error-message"></div>
+        
+                <div class="result-card" id="resultCard">
+                    <div class="media-info">
+                        <div class="thumbnail-container">
+                            <img src="" alt="Thumbnail" class="thumbnail" id="thumbImg">
+                            <div class="duration-badge" id="durationBadge">00:00</div>
+                        </div>
+                        <div class="details">
+                            <h2 class="title" id="mediaTitle">Loading...</h2>
+                            <a href="#" class="download-btn" id="downloadBtn">⬇ Download MP3 (192kbps)</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        
+            <script>
+                async function extractMedia() {
+                    const urlInput = document.getElementById('urlInput');
+                    const extractBtn = document.getElementById('extractBtn');
+                    const resultCard = document.getElementById('resultCard');
+                    const errorMsg = document.getElementById('errorMsg');
+        
+                    const url = urlInput.value.trim();
+                    if (!url) return;
+        
+                    extractBtn.disabled = true;
+                    extractBtn.textContent = 'Searching...';
+                    errorMsg.style.display = 'none';
+                    resultCard.style.display = 'none';
+        
+                    try {
+                        const response = await fetch('/api/extract', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: url })
+                        });
+        
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Failed to extract media details');
+        
+                        document.getElementById('thumbImg').src = data.thumbnail;
+                        document.getElementById('durationBadge').textContent = data.duration;
+                        document.getElementById('mediaTitle').textContent = data.title;
+        
+                        const downloadBtn = document.getElementById('downloadBtn');
+                        downloadBtn.href = `/api/download?url=${encodeURIComponent(data.original_url)}`;
+        
+                        resultCard.style.display = 'block';
+                    } catch (err) {
+                        errorMsg.textContent = err.message;
+                        errorMsg.style.display = 'block';
+                    } finally {
+                        extractBtn.disabled = false;
+                        extractBtn.textContent = 'Find Track';
+                    }
+                }
+        
+                document.getElementById('urlInput').addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') extractMedia();
+                });
+            </script>
+        </body>
+        </html>
+        EOF
+        
+        # Create app.py
+        cat > app.py << 'EOF'
+        import os
+        import re
+        import uuid
+        import requests
+        from flask import Flask, render_template, request, jsonify, send_file, after_this_request
+        import yt_dlp
+        
+        app = Flask(__name__)
+        DOWNLOAD_DIR = "downloads"
+        os.makedirs(DOWNLOAD_DIR, exist_ok=True)
+        
+        def get_base_ydl_opts():
+            return {
+                'quiet': True,
+                'noplaylist': True,
+                'js_interp': 'deno',
+            }
+        
+        def resolve_spotify_url(url):
+            try:
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                response = requests.get(url, headers=headers, timeout=10)
+                title_match = re.search(r'<title>(.+?)</title>', response.text)
+                if title_match:
+                    raw_title = title_match.group(1)
+                    clean_query = raw_title.replace(" | Spotify", "").replace(" - song and lyrics by ", " - ")
+                    return f"ytsearch1:{clean_query} audio"
+            except Exception:
+                pass
+            return None
+        
+        @app.route('/')
+        def index():
+            return render_template('index.html')
+        
+        @app.route('/api/extract', methods=['POST'])
+        def extract_info():
+            data = request.get_json()
+            url = data.get('url')
+            
+            if not url:
+                return jsonify({'error': 'No URL provided'}), 400
+        
+            target_url = url
+            if "spotify.com" in url:
+                resolved = resolve_spotify_url(url)
+                if resolved:
+                    target_url = resolved
+                else:
+                    return jsonify({'error': 'Could not parse Spotify track metadata'}), 400
+        
+            ydl_opts = get_base_ydl_opts()
+            ydl_opts['skip_download'] = True
+        
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(target_url, download=False)
+                    if 'entries' in info and len(info['entries']) > 0:
+                        info = info['entries'][0]
+        
+                    return jsonify({
+                        'title': info.get('title', 'Unknown Title'),
+                        'thumbnail': info.get('thumbnail', ''),
+                        'duration': info.get('duration_string', '00:00'),
+                        'original_url': url
+                    })
+        
+            except Exception as e:
+                return jsonify({'error': f'Extraction failed: {str(e)}'}), 500
+        
+        @app.route('/api/download', methods=['GET'])
+        def download_audio():
+            url = request.args.get('url')
+            if not url:
+                return "No URL provided", 400
+        
+            target_url = url
+            if "spotify.com" in url:
+                resolved = resolve_spotify_url(url)
+                if resolved:
+                    target_url = resolved
+                else:
+                    return "Could not parse Spotify track for download", 400
+        
+            job_id = str(uuid.uuid4())
+            
+            ydl_opts = get_base_ydl_opts()
+            ydl_opts.update({
+                'format': 'bestaudio/best',
+                'outtmpl': f'{DOWNLOAD_DIR}/{job_id}.%(ext)s',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': '192',
+                }],
+            })
+        
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(target_url, download=True)
+                    if 'entries' in info and len(info['entries']) > 0:
+                        info = info['entries'][0]
+                    title = info.get('title', 'Audio_Download')
+                    
+                file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
+                
+                safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c in (' ', '-', '_')]).rstrip()
+                download_name = f"{safe_title}.mp3"
+        
+                @after_this_request
+                def remove_file(response):
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except Exception as err:
+                        app.logger.error(f"Error purging file cache: {err}")
+                    return response
+        
+                return send_file(file_path, as_attachment=True, download_name=download_name, mimetype="audio/mpeg")
+        
+            except Exception as e:
+                return f"Download execution failed: {str(e)}", 500
+        
+        if __name__ == '__main__':
+            port = int(os.environ.get("PORT", 5000))
+            app.run(host="0.0.0.0", port=port)
+        EOF
+        
+        # Create README.md
+        cat > README.md << 'EOF'
+        # Muvixo Spotify & YouTube Downloader
+        
+        A clean, modern web application designed to safely fetch and convert high-fidelity MP3 audio files from Spotify and YouTube links.
+        
+        ## Features
+        - Extract audio from Spotify and YouTube links
+        - Convert to high-quality MP3 (192kbps)
+        - Clean, modern UI with dark theme
+        - Uses DenoJS for advanced extraction
+        
+        ## Deployment
+        This app is deployed using Cloudflare Tunnel via GitHub Actions.
+        EOF
+        
+        echo "✅ All files created successfully"
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg curl unzip wget
+
+    - name: Install Deno
+      run: |
+        curl -fsSL https://deno.land/install.sh | sh
+        export DENO_INSTALL="$HOME/.deno"
+        export PATH="$DENO_INSTALL/bin:$PATH"
+        echo "DENO_INSTALL=$HOME/.deno" >> $GITHUB_ENV
+        echo "$HOME/.deno/bin" >> $GITHUB_PATH
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Install Cloudflared
+      run: |
+        wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+        chmod +x cloudflared-linux-amd64
+        sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
+        cloudflared --version
+
+    - name: Start Flask app
+      run: |
+        nohup python app.py > flask.log 2>&1 &
+        sleep 10
+        
+        if curl -s http://localhost:5000 > /dev/null; then
+          echo "✅ Flask app is running"
+        else
+          echo "❌ Flask app failed to start"
+          cat flask.log
+          exit 1
+        fi
+
+    - name: Deploy with Cloudflare Tunnel
+      id: deploy
+      run: |
+        # Start Cloudflare tunnel
+        cloudflared tunnel --url http://localhost:5000 --protocol http2 2>&1 | tee cloudflare.log &
+        CF_PID=$!
+        
+        # Wait for tunnel to establish
+        sleep 15
+        
+        # Extract URL
+        CF_URL=$(grep -o "https://[^ ]*\.trycloudflare\.com" cloudflare.log | head -1)
+        
+        if [ -n "$CF_URL" ]; then
+          echo "CF_URL=$CF_URL" >> $GITHUB_ENV
+          echo "✅ Cloudflare tunnel established"
+          echo "🌐 URL: $CF_URL"
+        else
+          echo "❌ Failed to establish tunnel"
+          cat cloudflare.log
+          exit 1
+        fi
+        
+        # Keep tunnel running
+        echo "🔄 Tunnel is running (PID: $CF_PID)"
+        wait $CF_PID
+
+    - name: Display URL
+      if: success()
+      run: |
+        echo "=================================================="
+        echo "✅ DEPLOYMENT SUCCESSFUL!"
+        echo "=================================================="
+        echo "🌐 Your app is live at: ${{ env.CF_URL }}"
+        echo "📱 Share this URL to access your app"
+        echo "⏱️ Tunnel active for job duration (max 60 min)"
+        echo "=================================================="
