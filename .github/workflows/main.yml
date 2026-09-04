@@ -20,9 +20,12 @@ jobs:
         # Create requirements.txt
         cat > requirements.txt << 'EOF'
         flask
-        yt-dlp
+        git+https://github.com/yt-dlp/yt-dlp.git@master
         gunicorn
         requests
+        requests[socks]
+        PySocks
+        curl_cffi
         EOF
         
         # Create Procfile
@@ -217,11 +220,12 @@ jobs:
         </html>
         EOF
         
-        # Create app.py with WARP proxy support
+        # Create app.py with fully bypassed WARP/Deno/Impersonate configuration
         cat > app.py << 'EOF'
         import os
         import re
         import uuid
+        import socket
         import requests
         from flask import Flask, render_template, request, jsonify, send_file, after_this_request
         import yt_dlp
@@ -230,51 +234,61 @@ jobs:
         DOWNLOAD_DIR = "downloads"
         os.makedirs(DOWNLOAD_DIR, exist_ok=True)
         
+        def get_warp_proxies():
+            """Check if WARP container port is open and return proxy config."""
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('127.0.0.1', 1080))
+                sock.close()
+                if result == 0:
+                    # socks5h ensures DNS is also resolved through the proxy
+                    return {'http': 'socks5h://127.0.0.1:1080', 'https': 'socks5h://127.0.0.1:1080'}
+            except Exception:
+                pass
+            return {}
+
         def get_base_ydl_opts():
-            """Returns options with WARP proxy and Deno bypass"""
+            """Returns options with robust bypassing: Deno, impersonation, and WARP proxy."""
             opts = {
                 'quiet': True,
                 'noplaylist': True,
-                'js_interp': 'deno',  # Use Deno for JavaScript challenges
+                'js_interp': 'deno',  
                 'extract_flat': False,
                 'ignoreerrors': True,
                 'no_warnings': False,
                 'sleep_interval': 5,
                 'max_sleep_interval': 10,
                 'sleep_interval_requests': 1,
+                'impersonate': 'chrome110', # Requires curl_cffi - defeats TLS fingerprinting
                 'extractor_args': {
                     'youtube': {
-                        'player_client': ['android', 'web', 'mweb'],
+                        # Utilizing iOS and TV clients frequently bypasses blockades web clients face
+                        'player_client': ['android', 'ios', 'tv', 'web'],
                         'skip': ['hls', 'dash'],
                     }
                 },
-                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'add_headers': {
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                     'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Sec-Fetch-Mode': 'navigate'
                 },
             }
             
-            # Use WARP proxy if available (port 1080 from the container)
-            try:
-                import socket
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)
-                result = sock.connect_ex(('127.0.0.1', 1080))
-                sock.close()
-                if result == 0:
-                    opts['proxy'] = 'socks5://127.0.0.1:1080'
-                    print("✅ WARP proxy detected on port 1080")
-            except Exception:
-                pass
+            proxies = get_warp_proxies()
+            if proxies:
+                opts['proxy'] = proxies['http']
+                print("✅ Configured yt-dlp to use WARP proxy with DNS resolution (socks5h)")
             
             return opts
         
         def resolve_spotify_url(url):
-            """Resolve Spotify URL to YouTube search query using oEmbed"""
+            """Resolve Spotify URL to YouTube search query using proxy to avoid IP bans."""
+            proxies = get_warp_proxies()
             try:
-                # Try oEmbed first
                 oembed_url = f"https://open.spotify.com/oembed?url={url}"
-                response = requests.get(oembed_url, timeout=10)
+                response = requests.get(oembed_url, proxies=proxies, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
                     title = data.get('title', '')
@@ -284,14 +298,13 @@ jobs:
                     elif title:
                         return f"ytsearch1:{title} audio"
                 
-                # Fallback: scrape the page
-                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                response = requests.get(url, headers=headers, timeout=10)
+                # Fallback scraping
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+                response = requests.get(url, headers=headers, proxies=proxies, timeout=10)
                 title_match = re.search(r'<title>(.+?)</title>', response.text)
                 if title_match:
                     raw_title = title_match.group(1)
                     clean_query = raw_title.replace(" | Spotify", "").replace(" - song and lyrics by ", " - ")
-                    # Extract artist and track
                     parts = clean_query.split(" · ")
                     if len(parts) >= 2:
                         track = parts[0].strip()
@@ -358,7 +371,6 @@ jobs:
                     return "Could not parse Spotify track for download", 400
         
             job_id = str(uuid.uuid4())
-            
             ydl_opts = get_base_ydl_opts()
             ydl_opts.update({
                 'format': 'bestaudio/best',
@@ -378,7 +390,6 @@ jobs:
                     title = info.get('title', 'Audio_Download')
                     
                 file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
-                
                 safe_title = "".join([c for c in title if c.isalpha() or c.isdigit() or c in (' ', '-', '_')]).rstrip()
                 download_name = f"{safe_title}.mp3"
         
@@ -442,6 +453,7 @@ jobs:
         sleep 20
         echo "🔎 Checking WARP status..."
         for i in {1..8}; do
+          # Use socks5h in curl to force proxy DNS resolution
           RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
           if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
             echo "✅ WARP is active!"
