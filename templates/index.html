@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StreamPulse | High-Quality Media Extractor</title>
+    <title>Muvixo | Media Extractor</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-dark: #090a0f;
-            --card-bg: rgba(18, 20, 32, 0.7);
+            --bg-dark: #07090e;
+            --card-bg: rgba(14, 17, 26, 0.8);
             --border-color: rgba(255, 255, 255, 0.08);
             --accent: #10b981;
             --accent-hover: #059669;
@@ -29,17 +29,14 @@
             justify-content: center;
             padding: 2rem 1rem;
             background-image: 
-                radial-gradient(circle at 10% 20%, rgba(16, 185, 129, 0.07) 0%, transparent 40%),
-                radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
+                radial-gradient(circle at 15% 15%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
+                radial-gradient(circle at 85% 85%, rgba(14, 165, 233, 0.06) 0%, transparent 45%);
         }
 
         .container { width: 100%; max-width: 720px; }
 
-        .header-title {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        .header-title h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+        .header-title { text-align: center; margin-bottom: 2rem; }
+        .header-title h1 { font-size: 2.2rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.4rem; color: #fff; }
         .header-title p { color: var(--text-muted); font-size: 0.95rem; }
 
         .search-box {
@@ -48,7 +45,7 @@
             border: 1px solid var(--border-color);
             border-radius: 20px;
             padding: 1.5rem;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
             display: flex;
             gap: 0.75rem;
             margin-bottom: 1.5rem;
@@ -56,20 +53,17 @@
 
         input {
             flex: 1;
-            background: rgba(0, 0, 0, 0.3);
+            background: rgba(0, 0, 0, 0.35);
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            padding: 0.85rem 1.25rem;
+            padding: 0.9rem 1.25rem;
             color: var(--text-main);
             font-size: 1rem;
             outline: none;
             transition: all 0.2s ease;
         }
 
-        input:focus { 
-            border-color: var(--accent); 
-            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
-        }
+        input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
 
         button {
             background: var(--accent);
@@ -93,7 +87,7 @@
             border: 1px solid var(--border-color);
             border-radius: 20px;
             overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
             animation: fadeIn 0.3s ease forwards;
         }
 
@@ -108,19 +102,20 @@
         .thumbnail-container { 
             position: relative; 
             width: 100%; 
-            max-width: 280px; 
+            max-width: 240px; 
             background: #000; 
             display: flex; 
             align-items: center; 
             justify-content: center; 
             overflow: hidden; 
+            flex-shrink: 0;
         }
         
         .thumbnail { 
             width: 100%; 
             height: 100%; 
-            max-height: 200px;
-            object-fit: contain; 
+            aspect-ratio: 1 / 1;
+            object-fit: cover; 
             display: block; 
         }
         
@@ -133,10 +128,11 @@
             border-radius: 6px;
             font-size: 0.75rem;
             font-weight: 600;
+            color: #fff;
         }
 
         .details { padding: 1.75rem; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
-        .title { font-size: 1.1rem; font-weight: 600; line-height: 1.4; margin-bottom: 1.5rem; color: var(--text-main); }
+        .title { font-size: 1.15rem; font-weight: 600; line-height: 1.4; margin-bottom: 1.5rem; color: var(--text-main); }
 
         .download-btn {
             display: inline-flex;
@@ -146,17 +142,14 @@
             background: var(--accent);
             color: #000;
             text-decoration: none;
-            padding: 0.85rem 1rem;
+            padding: 0.9rem 1rem;
             border-radius: 12px;
             font-weight: 600;
             font-size: 0.95rem;
             transition: all 0.2s ease;
         }
 
-        .download-btn:hover {
-            background: var(--accent-hover);
-            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25);
-        }
+        .download-btn:hover { background: var(--accent-hover); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.25); }
         
         .error-message { 
             background: rgba(239, 68, 68, 0.1);
@@ -174,12 +167,12 @@
 <body>
     <div class="container">
         <div class="header-title">
-            <h1>Media Extractor</h1>
-            <p>Convert YouTube & Spotify links to high-quality MP3 tracks instantly</p>
+            <h1>Muvixo</h1>
+            <p>Extract high-fidelity audio tracks from Spotify & YouTube</p>
         </div>
 
         <div class="search-box">
-            <input type="text" id="urlInput" placeholder="Paste link here (e.g., https://...)" autocomplete="off">
+            <input type="text" id="urlInput" placeholder="Paste Spotify or YouTube track link..." autocomplete="off">
             <button id="extractBtn" onclick="extractMedia()">Search</button>
         </div>
         
