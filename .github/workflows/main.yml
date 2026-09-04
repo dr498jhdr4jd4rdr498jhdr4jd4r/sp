@@ -242,7 +242,6 @@ jobs:
                 result = sock.connect_ex(('127.0.0.1', 1080))
                 sock.close()
                 if result == 0:
-                    # socks5h ensures DNS is also resolved through the proxy
                     return {'http': 'socks5h://127.0.0.1:1080', 'https': 'socks5h://127.0.0.1:1080'}
             except Exception:
                 pass
@@ -255,16 +254,16 @@ jobs:
                 'noplaylist': True,
                 'js_interp': 'deno',  
                 'extract_flat': False,
-                'ignoreerrors': True,
+                'ignoreerrors': False,  # Changed to False so errors are caught properly
                 'no_warnings': False,
                 'sleep_interval': 5,
                 'max_sleep_interval': 10,
                 'sleep_interval_requests': 1,
-                'impersonate': 'chrome110', # Requires curl_cffi - defeats TLS fingerprinting
+                'impersonate': 'chrome', # Uses latest curl_cffi Chrome target
                 'extractor_args': {
                     'youtube': {
-                        # Utilizing iOS and TV clients frequently bypasses blockades web clients face
-                        'player_client': ['android', 'ios', 'tv', 'web'],
+                        # Strictly Android/iOS bypasses web PO token verification
+                        'player_client': ['android', 'ios'],
                         'skip': ['hls', 'dash'],
                     }
                 },
@@ -342,8 +341,15 @@ jobs:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(target_url, download=False)
-                    if 'entries' in info and len(info['entries']) > 0:
-                        info = info['entries'][0]
+                    
+                    if not info:
+                        raise Exception("Media blocked or unavailable.")
+                        
+                    if 'entries' in info:
+                        if len(info['entries']) > 0:
+                            info = info['entries'][0]
+                        else:
+                            raise Exception("Search query returned no tracks.")
         
                     return jsonify({
                         'title': info.get('title', 'Unknown Title'),
@@ -352,9 +358,10 @@ jobs:
                         'original_url': url
                     })
         
+            except yt_dlp.utils.DownloadError as e:
+                return jsonify({'error': f'Download Error: {str(e)}'}), 500
             except Exception as e:
-                error_msg = str(e)
-                return jsonify({'error': f'Extraction failed: {error_msg}'}), 500
+                return jsonify({'error': f'Extraction failed: {str(e)}'}), 500
         
         @app.route('/api/download', methods=['GET'])
         def download_audio():
@@ -385,8 +392,15 @@ jobs:
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(target_url, download=True)
-                    if 'entries' in info and len(info['entries']) > 0:
-                        info = info['entries'][0]
+                    if not info:
+                        raise Exception("Media blocked or unavailable.")
+                        
+                    if 'entries' in info:
+                        if len(info['entries']) > 0:
+                            info = info['entries'][0]
+                        else:
+                            raise Exception("Search query returned no tracks.")
+                            
                     title = info.get('title', 'Audio_Download')
                     
                 file_path = f"{DOWNLOAD_DIR}/{job_id}.mp3"
