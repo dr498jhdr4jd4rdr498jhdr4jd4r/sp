@@ -1,3 +1,4 @@
+import os
 from flask import Flask, render_template, request, jsonify
 import yt_dlp
 
@@ -24,7 +25,6 @@ def extract_info():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             
-            # Extract and filter formats (preferring mp4 video with reasonable resolutions)
             formats = []
             seen_resolutions = set()
             
@@ -32,7 +32,6 @@ def extract_info():
                 res = f.get('format_note', '')
                 ext = f.get('ext', '')
                 
-                # Filter for usable video formats
                 if f.get('vcodec') != 'none' and ext == 'mp4' and res:
                     if res not in seen_resolutions:
                         seen_resolutions.add(res)
@@ -42,7 +41,6 @@ def extract_info():
                             'url': f.get('url')
                         })
             
-            # Sort formats by resolution (highest first)
             formats.sort(
                 key=lambda x: int(x['resolution'].replace('p', '').replace('60', '')) if any(c.isdigit() for c in x['resolution']) else 0,
                 reverse=True
@@ -59,4 +57,6 @@ def extract_info():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Railway passes the port dynamically. Fallback to 5000 for local testing.
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
